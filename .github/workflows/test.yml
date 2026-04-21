@@ -1,0 +1,110 @@
+name: Test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  sqlite:
+    name: SQLite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+      - run: go test ./...
+        env:
+          GORM_DIALECT: sqlite
+
+  mysql:
+    name: MySQL
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:latest
+        ports:
+          - 9910:3306
+        env:
+          MYSQL_DATABASE: gorm
+          MYSQL_USER: gorm
+          MYSQL_PASSWORD: gorm
+          MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+      - run: go test ./...
+        env:
+          GORM_DIALECT: mysql
+
+  postgres:
+    name: PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        ports:
+          - 9920:5432
+        env:
+          POSTGRES_USER: gorm
+          POSTGRES_DB: gorm
+          POSTGRES_PASSWORD: gorm
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+      - run: go test ./...
+        env:
+          GORM_DIALECT: postgres
+
+  mssql:
+    name: SQL Server
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        ports:
+          - 9930:1433
+        env:
+          ACCEPT_EULA: "Y"
+          SA_PASSWORD: LoremIpsum86
+          MSSQL_PID: Express
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P LoremIpsum86 -C -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+      - name: Install sqlcmd
+        run: |
+          curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update -q
+          sudo ACCEPT_EULA=Y apt-get install -yq mssql-tools18 unixodbc-dev
+      - name: Create gorm database and user
+        run: |
+          /opt/mssql-tools18/bin/sqlcmd -S localhost,9930 -U SA -P LoremIpsum86 -C -Q "CREATE LOGIN gorm WITH PASSWORD = 'LoremIpsum86';"
+          /opt/mssql-tools18/bin/sqlcmd -S localhost,9930 -U SA -P LoremIpsum86 -C -Q "CREATE DATABASE gorm;"
+          /opt/mssql-tools18/bin/sqlcmd -S localhost,9930 -U SA -P LoremIpsum86 -C -d gorm -Q "CREATE USER gorm FROM LOGIN gorm; ALTER ROLE db_owner ADD MEMBER gorm;"
+      - run: go test ./...
+        env:
+          GORM_DIALECT: mssql
