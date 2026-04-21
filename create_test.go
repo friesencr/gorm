@@ -9,7 +9,7 @@ import (
 
 	"github.com/jinzhu/now"
 
-	"github.com/jinzhu/gorm"
+	"github.com/friesencr/gorm"
 )
 
 func TestCreate(t *testing.T) {

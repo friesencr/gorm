@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/jinzhu/gorm"
+	"github.com/friesencr/gorm"
 )
 
 func TestBelongsTo(t *testing.T) {
@@ -812,7 +812,7 @@ func TestForeignKey(t *testing.T) {
 	for _, structField := range DB.NewScope(&User{}).GetStructFields() {
 		for _, foreignKey := range []string{"BillingAddressID", "ShippingAddressId", "CompanyID"} {
 			if structField.Name == foreignKey && !structField.IsForeignKey {
-				t.Errorf(fmt.Sprintf("%v should be foreign key", foreignKey))
+				t.Errorf("%v should be foreign key", foreignKey)
 			}
 		}
 	}
@@ -820,7 +820,7 @@ func TestForeignKey(t *testing.T) {
 	for _, structField := range DB.NewScope(&Email{}).GetStructFields() {
 		for _, foreignKey := range []string{"UserId"} {
 			if structField.Name == foreignKey && !structField.IsForeignKey {
-				t.Errorf(fmt.Sprintf("%v should be foreign key", foreignKey))
+				t.Errorf("%v should be foreign key", foreignKey)
 			}
 		}
 	}
@@ -828,7 +828,7 @@ func TestForeignKey(t *testing.T) {
 	for _, structField := range DB.NewScope(&Post{}).GetStructFields() {
 		for _, foreignKey := range []string{"CategoryId", "MainCategoryId"} {
 			if structField.Name == foreignKey && !structField.IsForeignKey {
-				t.Errorf(fmt.Sprintf("%v should be foreign key", foreignKey))
+				t.Errorf("%v should be foreign key", foreignKey)
 			}
 		}
 	}
@@ -836,7 +836,7 @@ func TestForeignKey(t *testing.T) {
 	for _, structField := range DB.NewScope(&Comment{}).GetStructFields() {
 		for _, foreignKey := range []string{"PostId"} {
 			if structField.Name == foreignKey && !structField.IsForeignKey {
-				t.Errorf(fmt.Sprintf("%v should be foreign key", foreignKey))
+				t.Errorf("%v should be foreign key", foreignKey)
 			}
 		}
 	}
@@ -852,16 +852,16 @@ func testForeignKey(t *testing.T, source interface{}, sourceFieldName string, ta
 	modelScope := DB.NewScope(source)
 	modelField, ok := modelScope.FieldByName(sourceFieldName)
 	if !ok {
-		t.Fatalf(fmt.Sprintf("Failed to get field by name: %v", sourceFieldName))
+		t.Fatalf("Failed to get field by name: %v", sourceFieldName)
 	}
 	targetField, ok := targetScope.FieldByName(targetFieldName)
 	if !ok {
-		t.Fatalf(fmt.Sprintf("Failed to get field by name: %v", targetFieldName))
+		t.Fatalf("Failed to get field by name: %v", targetFieldName)
 	}
 	dest := fmt.Sprintf("%v(%v)", targetTableName, targetField.DBName)
 	err := DB.Model(source).AddForeignKey(modelField.DBName, dest, "CASCADE", "CASCADE").Error
 	if err != nil {
-		t.Fatalf(fmt.Sprintf("Failed to create foreign key: %v", err))
+		t.Fatalf("Failed to create foreign key: %v", err)
 	}
 }
 
