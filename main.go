@@ -31,6 +31,7 @@ type DB struct {
 	callbacks     *Callback
 	dialect       Dialect
 	singularTable bool
+	ctx           context.Context
 
 	// function to be used to override the creating of a new timestamp
 	nowFuncOverride func() time.Time
@@ -46,15 +47,17 @@ const (
 
 // Open initialize a new db connection, need to import driver first, e.g:
 //
-//     import _ "github.com/go-sql-driver/mysql"
-//     func main() {
-//       db, err := gorm.Open("mysql", "user:password@/dbname?charset=utf8&parseTime=True&loc=Local")
-//     }
+//	import _ "github.com/go-sql-driver/mysql"
+//	func main() {
+//	  db, err := gorm.Open("mysql", "user:password@/dbname?charset=utf8&parseTime=True&loc=Local")
+//	}
+//
 // GORM has wrapped some drivers, for easier to remember driver's import path, so you could import the mysql driver with
-//    import _ "github.com/jinzhu/gorm/dialects/mysql"
-//    // import _ "github.com/jinzhu/gorm/dialects/postgres"
-//    // import _ "github.com/jinzhu/gorm/dialects/sqlite"
-//    // import _ "github.com/jinzhu/gorm/dialects/mssql"
+//
+//	import _ "github.com/jinzhu/gorm/dialects/mysql"
+//	// import _ "github.com/jinzhu/gorm/dialects/postgres"
+//	// import _ "github.com/jinzhu/gorm/dialects/sqlite"
+//	// import _ "github.com/jinzhu/gorm/dialects/mssql"
 func Open(dialect string, args ...interface{}) (db *DB, err error) {
 	if len(args) == 0 {
 		err = errors.New("invalid database source")
@@ -83,13 +86,14 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 	}
 
 	db = &DB{
-		db:        dbSQL,
-		logger:    defaultLogger,
-		
+		db:     dbSQL,
+		logger: defaultLogger,
+
 		// Create a clone of the default logger to avoid mutating a shared object when
 		// multiple gorm connections are created simultaneously.
 		callbacks: DefaultCallback.clone(defaultLogger),
 		dialect:   newDialect(dialect, dbSQL),
+		ctx:       context.Background(),
 	}
 	db.parent = db
 	if err != nil {
@@ -109,6 +113,15 @@ func (s *DB) New() *DB {
 	clone := s.clone()
 	clone.search = nil
 	clone.Value = nil
+	return clone
+}
+
+// New clone a new db connection without search conditions with context specified
+func (s *DB) NewWithContext(ctx context.Context) *DB {
+	clone := s.clone()
+	clone.search = nil
+	clone.Value = nil
+	clone.ctx = ctx
 	return clone
 }
 
@@ -145,7 +158,9 @@ func (s *DB) Dialect() Dialect {
 }
 
 // Callback return `Callbacks` container, you could add/change/delete callbacks with it
-//     db.Callback().Create().Register("update_created_at", updateCreated)
+//
+//	db.Callback().Create().Register("update_created_at", updateCreated)
+//
 // Refer https://jinzhu.github.io/gorm/development.html#callbacks
 func (s *DB) Callback() *Callback {
 	s.parent.callbacks = s.parent.callbacks.clone(s.logger)
@@ -259,9 +274,10 @@ func (s *DB) Offset(offset interface{}) *DB {
 }
 
 // Order specify order when retrieve records from database, set reorder to `true` to overwrite defined conditions
-//     db.Order("name DESC")
-//     db.Order("name DESC", true) // reorder
-//     db.Order(gorm.Expr("name = ? DESC", "first")) // sql expression
+//
+//	db.Order("name DESC")
+//	db.Order("name DESC", true) // reorder
+//	db.Order(gorm.Expr("name = ? DESC", "first")) // sql expression
 func (s *DB) Order(value interface{}, reorder ...bool) *DB {
 	return s.clone().search.Order(value, reorder...).db
 }
@@ -288,23 +304,26 @@ func (s *DB) Having(query interface{}, values ...interface{}) *DB {
 }
 
 // Joins specify Joins conditions
-//     db.Joins("JOIN emails ON emails.user_id = users.id AND emails.email = ?", "jinzhu@example.org").Find(&user)
+//
+//	db.Joins("JOIN emails ON emails.user_id = users.id AND emails.email = ?", "jinzhu@example.org").Find(&user)
 func (s *DB) Joins(query string, args ...interface{}) *DB {
 	return s.clone().search.Joins(query, args...).db
 }
 
 // Scopes pass current database connection to arguments `func(*DB) *DB`, which could be used to add conditions dynamically
-//     func AmountGreaterThan1000(db *gorm.DB) *gorm.DB {
-//         return db.Where("amount > ?", 1000)
-//     }
 //
-//     func OrderStatus(status []string) func (db *gorm.DB) *gorm.DB {
-//         return func (db *gorm.DB) *gorm.DB {
-//             return db.Scopes(AmountGreaterThan1000).Where("status in (?)", status)
-//         }
-//     }
+//	func AmountGreaterThan1000(db *gorm.DB) *gorm.DB {
+//	    return db.Where("amount > ?", 1000)
+//	}
 //
-//     db.Scopes(AmountGreaterThan1000, OrderStatus([]string{"paid", "shipped"})).Find(&orders)
+//	func OrderStatus(status []string) func (db *gorm.DB) *gorm.DB {
+//	    return func (db *gorm.DB) *gorm.DB {
+//	        return db.Scopes(AmountGreaterThan1000).Where("status in (?)", status)
+//	    }
+//	}
+//
+//	db.Scopes(AmountGreaterThan1000, OrderStatus([]string{"paid", "shipped"})).Find(&orders)
+//
 // Refer https://jinzhu.github.io/gorm/crud.html#scopes
 func (s *DB) Scopes(funcs ...func(*DB) *DB) *DB {
 	for _, f := range funcs {
@@ -357,7 +376,7 @@ func (s *DB) Find(out interface{}, where ...interface{}) *DB {
 	return s.NewScope(out).inlineCondition(where...).callCallbacks(s.parent.callbacks.queries).db
 }
 
-//Preloads preloads relations, don`t touch out
+// Preloads preloads relations, don`t touch out
 func (s *DB) Preloads(out interface{}) *DB {
 	return s.NewScope(out).InstanceSet("gorm:only_preload", 1).callCallbacks(s.parent.callbacks.queries).db
 }
@@ -393,8 +412,9 @@ func (s *DB) ScanRows(rows *sql.Rows, result interface{}) error {
 }
 
 // Pluck used to query single column from a model as a map
-//     var ages []int64
-//     db.Find(&users).Pluck("age", &ages)
+//
+//	var ages []int64
+//	db.Find(&users).Pluck("age", &ages)
 func (s *DB) Pluck(column string, value interface{}) *DB {
 	return s.NewScope(s.Value).pluck(column, value).db
 }
@@ -493,7 +513,8 @@ func (s *DB) Delete(value interface{}, where ...interface{}) *DB {
 }
 
 // Raw use raw sql as conditions, won't run it unless invoked by other methods
-//    db.Raw("SELECT name, age FROM users WHERE name = ?", 3).Scan(&result)
+//
+//	db.Raw("SELECT name, age FROM users WHERE name = ?", 3).Scan(&result)
 func (s *DB) Raw(sql string, values ...interface{}) *DB {
 	return s.clone().search.Raw(true).Where(sql, values...).db
 }
@@ -508,10 +529,11 @@ func (s *DB) Exec(sql string, values ...interface{}) *DB {
 }
 
 // Model specify the model you would like to run db operations
-//    // update all users's name to `hello`
-//    db.Model(&User{}).Update("name", "hello")
-//    // if user's primary key is non-blank, will use it as condition, then will only update the user's name to `hello`
-//    db.Model(&user).Update("name", "hello")
+//
+//	// update all users's name to `hello`
+//	db.Model(&User{}).Update("name", "hello")
+//	// if user's primary key is non-blank, will use it as condition, then will only update the user's name to `hello`
+//	db.Model(&user).Update("name", "hello")
 func (s *DB) Model(value interface{}) *DB {
 	c := s.clone()
 	c.Value = value
@@ -730,7 +752,8 @@ func (s *DB) RemoveIndex(indexName string) *DB {
 }
 
 // AddForeignKey Add foreign key to the given scope, e.g:
-//     db.Model(&User{}).AddForeignKey("city_id", "cities(id)", "RESTRICT", "RESTRICT")
+//
+//	db.Model(&User{}).AddForeignKey("city_id", "cities(id)", "RESTRICT", "RESTRICT")
 func (s *DB) AddForeignKey(field string, dest string, onDelete string, onUpdate string) *DB {
 	scope := s.NewScope(s.Value)
 	scope.addForeignKey(field, dest, onDelete, onUpdate)
@@ -738,7 +761,8 @@ func (s *DB) AddForeignKey(field string, dest string, onDelete string, onUpdate 
 }
 
 // RemoveForeignKey Remove foreign key from the given scope, e.g:
-//     db.Model(&User{}).RemoveForeignKey("city_id", "cities(id)")
+//
+//	db.Model(&User{}).RemoveForeignKey("city_id", "cities(id)")
 func (s *DB) RemoveForeignKey(field string, dest string) *DB {
 	scope := s.clone().NewScope(s.Value)
 	scope.removeForeignKey(field, dest)
@@ -768,7 +792,8 @@ func (s *DB) Association(column string) *Association {
 }
 
 // Preload preload associations with given conditions
-//    db.Preload("Orders", "state NOT IN (?)", "cancelled").Find(&users)
+//
+//	db.Preload("Orders", "state NOT IN (?)", "cancelled").Find(&users)
 func (s *DB) Preload(column string, conditions ...interface{}) *DB {
 	return s.clone().search.Preload(column, conditions...).db
 }
@@ -855,6 +880,7 @@ func (s *DB) clone() *DB {
 		blockGlobalUpdate: s.blockGlobalUpdate,
 		dialect:           newDialect(s.dialect.GetName(), s.db),
 		nowFuncOverride:   s.nowFuncOverride,
+		ctx:               s.ctx,
 	}
 
 	s.values.Range(func(k, v interface{}) bool {

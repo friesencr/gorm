@@ -2,6 +2,7 @@ package gorm
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
@@ -24,6 +25,7 @@ type Scope struct {
 	skipLeft        bool
 	fields          *[]*Field
 	selectAttrs     *[]string
+	ctx             context.Context
 }
 
 // IndirectValue return scope's reflect value's indirect value
@@ -361,7 +363,7 @@ func (scope *Scope) Exec() *Scope {
 	defer scope.trace(NowFunc())
 
 	if !scope.HasError() {
-		if result, err := scope.SQLDB().Exec(scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
+		if result, err := scope.SQLDB().ExecContext(scope.ctx, scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
 			if count, err := result.RowsAffected(); scope.Err(err) == nil {
 				scope.db.RowsAffected = count
 			}
@@ -402,7 +404,7 @@ func (scope *Scope) InstanceGet(name string) (interface{}, bool) {
 // Begin start a transaction
 func (scope *Scope) Begin() *Scope {
 	if db, ok := scope.SQLDB().(sqlDb); ok {
-		if tx, err := db.Begin(); scope.Err(err) == nil {
+		if tx, err := db.BeginTx(scope.ctx, nil); scope.Err(err) == nil {
 			scope.db.db = interface{}(tx).(SQLCommon)
 			scope.InstanceSet("gorm:started_transaction", true)
 		}
