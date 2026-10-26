@@ -1,11 +1,67 @@
 package gorm_test
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/friesencr/gorm"
 )
+
+func TestUpdateConversionErrors(t *testing.T) {
+	db, err := OpenTestConnection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	type nullableUpdateRecord struct {
+		ID        uint `gorm:"primary_key"`
+		Name      string
+		Note      sql.NullString
+		Count     sql.NullInt64
+		DeletedAt *time.Time
+	}
+	if err := db.AutoMigrate(&nullableUpdateRecord{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	defer db.Unscoped().DropTable(&nullableUpdateRecord{})
+	var updateSQL string
+	db.Callback().Update().After("gorm:update").Register("test:conversion_update_sql", func(scope *gorm.Scope) {
+		updateSQL = scope.SQL
+	})
+	defer db.Callback().Update().Remove("test:conversion_update_sql")
+
+	for _, column := range []string{"note", "count", "deleted_at"} {
+		for _, mixed := range []bool{false, true} {
+			t.Run(column+"/mixed="+map[bool]string{false: "false", true: "true"}[mixed], func(t *testing.T) {
+				archivedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+				record := nullableUpdateRecord{Name: "original", Note: sql.NullString{String: "retained", Valid: true}, Count: sql.NullInt64{Int64: 7, Valid: true}, DeletedAt: &archivedAt}
+				if err := db.Unscoped().Create(&record).Error; err != nil {
+					t.Fatal(err)
+				}
+				updates := map[string]interface{}{column: struct{}{}}
+				if mixed {
+					updates["name"] = "changed"
+				}
+				updateSQL = ""
+				result := db.Unscoped().Model(&record).Updates(updates)
+				if result.Error == nil || result.RowsAffected != 0 {
+					t.Fatalf("expected conversion error and no writes, got error=%v rows=%d", result.Error, result.RowsAffected)
+				}
+				if updateSQL != "" {
+					t.Fatalf("conversion error generated update SQL: %s", updateSQL)
+				}
+				var stored nullableUpdateRecord
+				if err := db.Unscoped().First(&stored, record.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if stored.Name != "original" || stored.Note.String != "retained" || !stored.Note.Valid || stored.Count.Int64 != 7 || !stored.Count.Valid || stored.DeletedAt == nil || !stored.DeletedAt.Equal(archivedAt) {
+					t.Fatalf("failed update changed stored record: %+v", stored)
+				}
+			})
+		}
+	}
+}
 
 func TestUpdate(t *testing.T) {
 	product1 := Product{Code: "product1code"}
