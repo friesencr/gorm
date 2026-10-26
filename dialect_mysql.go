@@ -1,6 +1,7 @@
 package gorm
 
 import (
+	"context"
 	"crypto/sha1"
 	"database/sql"
 	"fmt"
@@ -174,7 +175,7 @@ func (s mysql) HasTable(tableName string) bool {
 	var name string
 	// allow mysql database name with '-' character
 	if err := s.db.QueryRow(fmt.Sprintf("SHOW TABLES FROM `%s` WHERE `Tables_in_%s` = ?", currentDatabase, currentDatabase), tableName).Scan(&name); err != nil {
-		if err == sql.ErrNoRows {
+		if err == sql.ErrNoRows || s.isContextError(err) {
 			return false
 		}
 		panic(err)
@@ -186,6 +187,9 @@ func (s mysql) HasTable(tableName string) bool {
 func (s mysql) HasIndex(tableName string, indexName string) bool {
 	currentDatabase, tableName := currentDatabaseAndTable(&s, tableName)
 	if rows, err := s.db.Query(fmt.Sprintf("SHOW INDEXES FROM `%s` FROM `%s` WHERE Key_name = ?", tableName, currentDatabase), indexName); err != nil {
+		if s.isContextError(err) {
+			return false
+		}
 		panic(err)
 	} else {
 		defer rows.Close()
@@ -196,6 +200,9 @@ func (s mysql) HasIndex(tableName string, indexName string) bool {
 func (s mysql) HasColumn(tableName string, columnName string) bool {
 	currentDatabase, tableName := currentDatabaseAndTable(&s, tableName)
 	if rows, err := s.db.Query(fmt.Sprintf("SHOW COLUMNS FROM `%s` FROM `%s` WHERE Field = ?", tableName, currentDatabase), columnName); err != nil {
+		if s.isContextError(err) {
+			return false
+		}
 		panic(err)
 	} else {
 		defer rows.Close()
@@ -206,6 +213,11 @@ func (s mysql) HasColumn(tableName string, columnName string) bool {
 func (s mysql) CurrentDatabase() (name string) {
 	s.db.QueryRow("SELECT DATABASE()").Scan(&name)
 	return
+}
+
+func (s mysql) isContextError(err error) bool {
+	_, enabled := s.db.(contextSQLCommon)
+	return enabled && (err == context.Canceled || err == context.DeadlineExceeded)
 }
 
 func (mysql) SelectFromDummyTable() string {
