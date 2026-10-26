@@ -31,7 +31,7 @@ type DB struct {
 	callbacks     *Callback
 	dialect       Dialect
 	singularTable bool
-	ctx           context.Context
+	ctx           context.Context // nil preserves legacy execution until WithContext is used
 
 	// function to be used to override the creating of a new timestamp
 	nowFuncOverride func() time.Time
@@ -54,10 +54,10 @@ const (
 //
 // GORM has wrapped some drivers, for easier to remember driver's import path, so you could import the mysql driver with
 //
-//	import _ "github.com/jinzhu/gorm/dialects/mysql"
-//	// import _ "github.com/jinzhu/gorm/dialects/postgres"
-//	// import _ "github.com/jinzhu/gorm/dialects/sqlite"
-//	// import _ "github.com/jinzhu/gorm/dialects/mssql"
+//	import _ "github.com/friesencr/gorm/dialects/mysql"
+//	// import _ "github.com/friesencr/gorm/dialects/postgres"
+//	// import _ "github.com/friesencr/gorm/dialects/sqlite"
+//	// import _ "github.com/friesencr/gorm/dialects/mssql"
 func Open(dialect string, args ...interface{}) (db *DB, err error) {
 	if len(args) == 0 {
 		err = errors.New("invalid database source")
@@ -92,9 +92,8 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 		// Create a clone of the default logger to avoid mutating a shared object when
 		// multiple gorm connections are created simultaneously.
 		callbacks: DefaultCallback.clone(defaultLogger),
-		dialect:   newDialect(dialect, dbSQL),
-		ctx:       context.Background(),
 	}
+	db.dialect = newDialect(dialect, db.sqlDB())
 	db.parent = db
 	if err != nil {
 		return
@@ -116,12 +115,11 @@ func (s *DB) New() *DB {
 	return clone
 }
 
-// New clone a new db connection without search conditions with context specified
+// NewWithContext returns a clone without search conditions or a model, using ctx.
 func (s *DB) NewWithContext(ctx context.Context) *DB {
-	clone := s.clone()
+	clone := s.WithContext(ctx)
 	clone.search = nil
 	clone.Value = nil
-	clone.ctx = ctx
 	return clone
 }
 
@@ -563,6 +561,9 @@ func (s *DB) Transaction(fc func(tx *DB) error) (err error) {
 
 	panicked := true
 	tx := s.Begin()
+	if s.ctx != nil && tx.Error != nil {
+		return tx.Error
+	}
 	defer func() {
 		// Make sure to rollback when panic, Block error or Commit error
 		if panicked || err != nil {
@@ -582,17 +583,25 @@ func (s *DB) Transaction(fc func(tx *DB) error) (err error) {
 
 // Begin begins a transaction
 func (s *DB) Begin() *DB {
-	return s.BeginTx(context.Background(), &sql.TxOptions{})
+	return s.BeginTx(s.Context(), &sql.TxOptions{})
 }
 
-// BeginTx begins a transaction with options
+// BeginTx begins a transaction with options. On a WithContext handle, ctx also
+// replaces the context for subsequent operations. Otherwise the legacy execution
+// paths are retained, and ctx controls the transaction lifetime as before.
 func (s *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) *DB {
-	c := s.clone()
+	cloneContext := s.ctx
+	if cloneContext != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		cloneContext = ctx
+	}
+	c := s.cloneWithContext(cloneContext)
 	if db, ok := c.db.(sqlDb); ok && db != nil {
 		tx, err := db.BeginTx(ctx, opts)
-		c.db = interface{}(tx).(SQLCommon)
-
-		c.dialect.SetDB(c.db)
+		c.db = tx
+		c.dialect.SetDB(c.sqlDB())
 		c.AddError(err)
 	} else {
 		c.AddError(ErrCantStartTransaction)
@@ -870,6 +879,10 @@ func (s *DB) GetErrors() []error {
 ////////////////////////////////////////////////////////////////////////////////
 
 func (s *DB) clone() *DB {
+	return s.cloneWithContext(s.ctx)
+}
+
+func (s *DB) cloneWithContext(ctx context.Context) *DB {
 	db := &DB{
 		db:                s.db,
 		parent:            s.parent,
@@ -878,10 +891,10 @@ func (s *DB) clone() *DB {
 		Value:             s.Value,
 		Error:             s.Error,
 		blockGlobalUpdate: s.blockGlobalUpdate,
-		dialect:           newDialect(s.dialect.GetName(), s.db),
 		nowFuncOverride:   s.nowFuncOverride,
-		ctx:               s.ctx,
+		ctx:               ctx,
 	}
+	db.dialect = newDialect(s.dialect.GetName(), db.sqlDB())
 
 	s.values.Range(func(k, v interface{}) bool {
 		db.values.Store(k, v)

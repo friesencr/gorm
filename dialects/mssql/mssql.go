@@ -1,7 +1,6 @@
 package mssql
 
 import (
-	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -13,7 +12,7 @@ import (
 
 	// Importing mssql driver package only in dialect file, otherwide not needed
 	_ "github.com/denisenkom/go-mssqldb"
-	"github.com/jinzhu/gorm"
+	"github.com/friesencr/gorm"
 )
 
 func setIdentityInsert(scope *gorm.Scope) {
@@ -125,19 +124,19 @@ func (s mssql) fieldCanAutoIncrement(field *gorm.StructField) bool {
 
 func (s mssql) HasIndex(tableName string, indexName string) bool {
 	var count int
-	s.db.QueryRowContext(context.Background(), "SELECT count(*) FROM sys.indexes WHERE name=? AND object_id=OBJECT_ID(?)", indexName, tableName).Scan(&count)
+	s.db.QueryRow("SELECT count(*) FROM sys.indexes WHERE name=? AND object_id=OBJECT_ID(?)", indexName, tableName).Scan(&count)
 	return count > 0
 }
 
 func (s mssql) RemoveIndex(tableName string, indexName string) error {
-	_, err := s.db.ExecContext(context.Background(), fmt.Sprintf("DROP INDEX %v ON %v", indexName, s.Quote(tableName)))
+	_, err := s.db.Exec(fmt.Sprintf("DROP INDEX %v ON %v", indexName, s.Quote(tableName)))
 	return err
 }
 
 func (s mssql) HasForeignKey(tableName string, foreignKeyName string) bool {
 	var count int
 	currentDatabase, tableName := currentDatabaseAndTable(&s, tableName)
-	s.db.QueryRowContext(context.Background(), `SELECT count(*) 
+	s.db.QueryRow(`SELECT count(*)
 	FROM sys.foreign_keys as F inner join sys.tables as T on F.parent_object_id=T.object_id 
 		inner join information_schema.tables as I on I.TABLE_NAME = T.name 
 	WHERE F.name = ? 
@@ -148,24 +147,24 @@ func (s mssql) HasForeignKey(tableName string, foreignKeyName string) bool {
 func (s mssql) HasTable(tableName string) bool {
 	var count int
 	currentDatabase, tableName := currentDatabaseAndTable(&s, tableName)
-	s.db.QueryRowContext(context.Background(), "SELECT count(*) FROM INFORMATION_SCHEMA.tables WHERE table_name = ? AND table_catalog = ?", tableName, currentDatabase).Scan(&count)
+	s.db.QueryRow("SELECT count(*) FROM INFORMATION_SCHEMA.tables WHERE table_name = ? AND table_catalog = ?", tableName, currentDatabase).Scan(&count)
 	return count > 0
 }
 
 func (s mssql) HasColumn(tableName string, columnName string) bool {
 	var count int
 	currentDatabase, tableName := currentDatabaseAndTable(&s, tableName)
-	s.db.QueryRowContext(context.Background(), "SELECT count(*) FROM information_schema.columns WHERE table_catalog = ? AND table_name = ? AND column_name = ?", currentDatabase, tableName, columnName).Scan(&count)
+	s.db.QueryRow("SELECT count(*) FROM information_schema.columns WHERE table_catalog = ? AND table_name = ? AND column_name = ?", currentDatabase, tableName, columnName).Scan(&count)
 	return count > 0
 }
 
 func (s mssql) ModifyColumn(tableName string, columnName string, typ string) error {
-	_, err := s.db.ExecContext(context.Background(), fmt.Sprintf("ALTER TABLE %v ALTER COLUMN %v %v", tableName, columnName, typ))
+	_, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %v ALTER COLUMN %v %v", tableName, columnName, typ))
 	return err
 }
 
 func (s mssql) CurrentDatabase() (name string) {
-	s.db.QueryRowContext(context.Background(), "SELECT DB_NAME() AS [Current Database]").Scan(&name)
+	s.db.QueryRow("SELECT DB_NAME() AS [Current Database]").Scan(&name)
 	return
 }
 
